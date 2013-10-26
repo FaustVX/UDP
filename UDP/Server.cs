@@ -62,10 +62,7 @@ namespace UDP
 			where T : class
 		{
 			byte[] datas = _server.Receive(ref client);
-			Client des = datas.Deserialize<Client>();
-			if (des != null)
-				Send(des, client);
-			else if (callBack != null)
+			if (callBack != null)
 				callBack(datas.Deserialize<T>(), client);
 		}
 

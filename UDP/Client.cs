@@ -4,101 +4,169 @@ using System.Net.Sockets;
 
 namespace UDP
 {
-	[Serializable]
 	public class Client : IDisposable
 	{
 		private readonly string _ipServer;
 		private readonly int _portServer;
-		[NonSerialized]
 		private IPEndPoint _server;
-		[NonSerialized]
 		private readonly UdpClient _client;
+
+		private Action<byte[]> _sendSync;
+		private Action<byte[], Action> _sendAsync;
+		private Action _setSendDelegate;
+
+		//public delegate void ReceivedMessage<in T>(T message);
 
 		public Client(string ipServer, int portServer)
 		{
 			_ipServer = ipServer;
 			_portServer = portServer;
 			_client = new UdpClient();
+
+			_sendSync = datas => _client.Send(datas, datas.Length, _ipServer, _portServer);
+			_sendAsync = (datas, action) => _client.BeginSend(datas, datas.Length, _ipServer, _portServer, iasync =>
+				{
+					_client.EndSend(iasync);
+					action();
+				}, null);
+			_setSendDelegate = () =>
+				{
+					_sendSync = data => _client.Send(data, data.Length, _server);
+					_sendAsync = (data, action) => _client.BeginSend(data, data.Length, _server, async =>
+						{
+							_client.EndSend(async);
+							action();
+						}, null);
+					_setSendDelegate = () => { };
+				};
 		}
 
-		
-		public void Send<T>(T message) where T : class
+		public void Send<T>(T message, Action<Exception> error = null)
 		{
-			Send(message, null);
+			try
+			{
+				byte[] datas = message.Serialize();
+				_sendSync(datas);
+				//if (_server != null)
+				//	_client.Send(datas, datas.Length, _server);
+				//else
+				//	_client.Send(datas, datas.Length, _ipServer, _portServer);
+			}
+			catch (Exception e)
+			{
+				if (error != null)
+					error(e);
+			}
 		}
 
-		public void Send<T>(T message, Action<T> receive, Action<Exception> error = null)
+		public void SendAsync<T>(T message, Action<Exception> error = null)
+		{
+			try
+			{
+				byte[] datas = message.Serialize();
+				_sendAsync(datas, delegate { });
+				//if (_server != null)
+				//	_client.BeginSend(datas, datas.Length, _server, iasync => _client.EndSend(iasync), null);
+				//else
+				//	_client.BeginSend(datas, datas.Length, _ipServer, _portServer, iasync => _client.EndSend(iasync), null);
+			}
+			catch (Exception e)
+			{
+				if (error != null)
+					error(e);
+			}
+		}
+
+		public T Receive<T>(Action<Exception> error = null)
+			where T : class
+		{
+			try
+			{
+				byte[] datas = _client.Receive(ref _server);
+				_setSendDelegate();
+
+				return datas.Deserialize<T>();
+			}
+			catch (Exception e)
+			{
+				if (error != null)
+					error(e);
+			}
+			return null;
+		}
+
+		public void ReceiveAsync<T>(Action<T> receive, Action<Exception> error = null)
+			where T : class
+		{
+			try
+			{
+				_client.BeginReceive(iasync =>
+					{
+						if (!iasync.IsCompleted)
+							return;
+						byte[] datas = _client.EndReceive(iasync, ref _server);
+						_setSendDelegate();
+
+						if (receive != null)
+							receive(datas.Deserialize<T>());
+					}, null);
+			}
+			catch (Exception e)
+			{
+				if (error != null)
+					error(e);
+			}
+		}
+
+		public T SendAndReceive<T>(T message, Action<Exception> error = null)
 			where T : class
 		{
 			try
 			{
 				byte[] datas = message.Serialize();
-				if (_server != null)
-					_client.Send(datas, datas.Length, _server);
-				else
-					_client.Send(datas, datas.Length, _ipServer, _portServer);
+				_sendSync(datas);
+				//if (_server != null)
+				//	_client.Send(datas, datas.Length, _server);
+				//else
+				//	_client.Send(datas, datas.Length, _ipServer, _portServer);
 
-				Receive(receive);
+				// Receive
+				return Receive<T>(error);
 			}
 			catch (Exception e)
 			{
 				if (error != null)
 					error(e);
 			}
+			return null;
 		}
 
-		public void Send(string message)
-		{
-			Send(message, null);
-		}
-
-		public void Send(string message, Action<string> receive, Action<Exception> error = null)
-		{
-			try
-			{
-				byte[] datas = message.EncodeString();
-				if (_server != null)
-					_client.Send(datas, datas.Length, _server);
-				else
-					_client.Send(datas, datas.Length, _ipServer, _portServer);
-
-				Receive(receive);
-			}
-			catch (Exception e)
-			{
-				if (error != null)
-					error(e);
-			}
-		}
-
-		public T Receive<T>()
+		public void SendAndReceiveAsync<T>(T message, Action<T> receive, Action<Exception> error = null)
 			where T : class
 		{
-			T result = null;
-			Receive<T>(t => result = t);
-			return result;
-		}
+			byte[] datas = message.Serialize();
+			_sendAsync(datas, () =>
+				{
+					if (receive != null)
+						ReceiveAsync(receive, error);
+				});
 
-		public string Receive()
-		{
-			string result = null;
-			Receive(s => result = s);
-			return result;
-		}
+			//if (_server != null)
+			//	_client.BeginSend(datas, datas.Length, _server, iasync =>
+			//	{
+			//		_client.EndSend(iasync);
 
-		public void Receive<T>(Action<T> callback)
-			where T : class
-		{
-			byte[] datas = _client.Receive(ref _server);
-			if (callback != null)
-				callback(datas.Deserialize<T>());
-		}
+			//		if (receive != null)
+			//			ReceiveAsync(receive, error);
+			//	}, null);
+			//else
+			//	_client.BeginSend(datas, datas.Length, _ipServer, _portServer, iasync =>
+			//	{
+			//		_client.EndSend(iasync);
 
-		public void Receive(Action<string> callBack)
-		{
-			byte[] datas = _client.Receive(ref _server);
-			if (callBack != null)
-				callBack(datas.DecodeBytes());
+			//		if (receive != null)
+			//			ReceiveAsync(receive, error);
+			//	}, null);
 		}
 
 		public void Close()
