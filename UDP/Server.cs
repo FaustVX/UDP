@@ -1,8 +1,6 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
-using System.Threading;
 
 namespace UDP
 {
@@ -10,16 +8,22 @@ namespace UDP
 	{
 		private readonly UdpClient _server;
 		private readonly int _port;
+		public IPEndPoint Address { get; private set; }
 
 		public Server(int port)
 		{
 			_port = port;
 			_server = new UdpClient(_port);
+
+			var m = "Test Local Address".EncodeString();
+			_server.Send(m, m.Length, new IPEndPoint(IPAddress.Broadcast, 0));
+			Address = (IPEndPoint)_server.Client.LocalEndPoint;
 		}
 
 		public void Send<T>(T message, string ip, int port)
-			where T : class
+			where T : Message
 		{
+			message.Sender = Address;
 			byte[] datas = message.Serialize();
 			_server.Send(datas, datas.Length, ip, port);
 		}
@@ -31,8 +35,9 @@ namespace UDP
 		}
 
 		public void Send<T>(T message, IPEndPoint client)
-			where T : class
+			where T : Message
 		{
+			message.Sender = Address;
 			byte[] datas = message.Serialize();
 			_server.Send(datas, datas.Length, client);
 		}
@@ -44,7 +49,7 @@ namespace UDP
 		}
 
 		public T Receive<T>(IPEndPoint client = null)
-			where T : class, new()
+			where T : Message, new()
 		{
 			T result = null;
 			Receive<T>((t, c) => result = t);
@@ -59,7 +64,7 @@ namespace UDP
 		}
 
 		public void Receive<T>(Action<T, IPEndPoint> callBack, IPEndPoint client = null)
-			where T : class
+			where T : Message
 		{
 			byte[] datas = _server.Receive(ref client);
 			if (callBack != null)

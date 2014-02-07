@@ -10,6 +10,7 @@ namespace UDP
 		private readonly int _portServer;
 		private IPEndPoint _server;
 		private readonly UdpClient _client;
+		public IPEndPoint Address { get; private set; }
 
 		private Action<byte[]> _sendSync;
 		private Action<byte[], Action> _sendAsync;
@@ -22,6 +23,10 @@ namespace UDP
 			_ipServer = ipServer;
 			_portServer = portServer;
 			_client = new UdpClient();
+
+			var m = "Test Local Address".EncodeString();
+			_client.Send(m, m.Length, new IPEndPoint(IPAddress.Broadcast, 0));
+			Address = (IPEndPoint)_client.Client.LocalEndPoint;
 
 			_sendSync = datas => _client.Send(datas, datas.Length, _ipServer, _portServer);
 			_sendAsync = (datas, action) => _client.BeginSend(datas, datas.Length, _ipServer, _portServer, iasync =>
@@ -42,7 +47,9 @@ namespace UDP
 		}
 
 		public void Send<T>(T message, Action<Exception> error = null)
+			where T : Message
 		{
+			message.Sender = Address;
 			try
 			{
 				byte[] datas = message.Serialize();
@@ -60,7 +67,9 @@ namespace UDP
 		}
 
 		public void SendAsync<T>(T message, Action<Exception> error = null)
+			where T : Message
 		{
+			message.Sender = Address;
 			try
 			{
 				byte[] datas = message.Serialize();
@@ -78,7 +87,7 @@ namespace UDP
 		}
 
 		public T Receive<T>(Action<Exception> error = null)
-			where T : class
+			where T : Message
 		{
 			try
 			{
@@ -96,7 +105,7 @@ namespace UDP
 		}
 
 		public void ReceiveAsync<T>(Action<T> receive, Action<Exception> error = null)
-			where T : class
+			where T : Message
 		{
 			try
 			{
@@ -119,8 +128,9 @@ namespace UDP
 		}
 
 		public T SendAndReceive<T>(T message, Action<Exception> error = null)
-			where T : class
+			where T : Message
 		{
+			message.Sender = Address;
 			try
 			{
 				byte[] datas = message.Serialize();
@@ -142,8 +152,9 @@ namespace UDP
 		}
 
 		public void SendAndReceiveAsync<T>(T message, Action<T> receive, Action<Exception> error = null)
-			where T : class
+			where T : Message
 		{
+			message.Sender = Address;
 			byte[] datas = message.Serialize();
 			_sendAsync(datas, () =>
 				{
